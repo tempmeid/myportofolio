@@ -10,6 +10,15 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Google Fonts Inter / Plus Jakarta Sans -->
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Firebase SDK Import Map -->
+    <script type="importmap">
+    {
+        "imports": {
+            "firebase/app": "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js",
+            "firebase/firestore": "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js"
+        }
+    }
+    </script>
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -98,7 +107,7 @@
                 </div>
                 <div>
                     <span id="navBrandName" class="font-extrabold text-lg tracking-tight text-slate-900" data-editable="brand_name" onclick="openElementEditor('brand_name', 'Nama Brand Navbar', this)">Alexandro Rey</span>
-                    <span class="block text-xs text-indigo-600 font-semibold" data-editable="brand_subtitle" onclick="openElementEditor('brand_subtitle', 'Subtitel Navbar', this)">AI & Fullstack Lead</span>
+                    <span id="navBrandSubtitle" class="block text-xs text-indigo-600 font-semibold" data-editable="brand_subtitle" onclick="openElementEditor('brand_subtitle', 'Subtitel Navbar', this)">AI & Fullstack Lead</span>
                 </div>
             </a>
 
@@ -620,7 +629,25 @@
         body.edit-mode-active .edit-triggers { display: flex !important; }
     </style>
 
-    <script>
+    <script type="module">
+        // Import the functions you need from the SDKs you need
+        import { initializeApp } from "firebase/app";
+        import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
+
+        // Your web app's Firebase configuration
+        const firebaseConfig = {
+          apiKey: "AIzaSyAzluJWuKnM6vmO9lGQqHPXcl3MDuxC478",
+          authDomain: "myportofolio-5b2c5.firebaseapp.com",
+          projectId: "myportofolio-5b2c5",
+          storageBucket: "myportofolio-5b2c5.firebasestorage.app",
+          messagingSenderId: "1073535189694",
+          appId: "1:1073535189694:web:3592e503c5060e7daa94ef"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const PORTFOLIO_DOC_REF = doc(db, "portfolio", "content");
         const defaultState = {
             isEditMode: false,
             deletedSections: [],
@@ -698,22 +725,61 @@
             ]
         };
 
-        let portfolioData = JSON.parse(localStorage.getItem('portfolio_live_data_light_v3')) || defaultState;
-        
-        portfolioData.isEditMode = false;
+        let portfolioData = JSON.parse(JSON.stringify(defaultState));
+        portfolioData.isEditMode = localStorage.getItem('portfolio_admin_logged_in') === 'true';
 
-        if(!portfolioData.deletedSections) portfolioData.deletedSections = [];
-        if(!portfolioData.customSections) portfolioData.customSections = [];
-        if(!portfolioData.elements) portfolioData.elements = defaultState.elements;
+        async function savePortfolioState() {
+            try {
+                const dataToSave = {
+                    deletedSections: portfolioData.deletedSections || [],
+                    customSections: portfolioData.customSections || [],
+                    elements: portfolioData.elements || defaultState.elements,
+                    about: portfolioData.about || defaultState.about,
+                    projects: portfolioData.projects || defaultState.projects,
+                    skills: portfolioData.skills || defaultState.skills
+                };
+                renderAll();
+                await setDoc(PORTFOLIO_DOC_REF, dataToSave, { merge: true });
+            } catch (err) {
+                console.error("Gagal menyimpan ke Firestore:", err);
+                showNotification("Peringatan: Gagal menyimpan ke Firestore. Periksa izin/koneksi.");
+            }
+        }
 
-        function savePortfolioState() {
-            localStorage.setItem('portfolio_live_data_light_v3', JSON.stringify(portfolioData));
+        // Setup real-time sync with Firestore
+        let isInitialLoad = true;
+        try {
+            onSnapshot(PORTFOLIO_DOC_REF, (docSnap) => {
+                if (docSnap.exists()) {
+                    const cloudData = docSnap.data();
+                    if (cloudData.elements) {
+                        portfolioData.elements = { ...defaultState.elements, ...cloudData.elements };
+                    }
+                    if (cloudData.about) portfolioData.about = cloudData.about;
+                    if (cloudData.projects) portfolioData.projects = cloudData.projects;
+                    if (cloudData.skills) portfolioData.skills = cloudData.skills;
+                    if (cloudData.customSections) portfolioData.customSections = cloudData.customSections;
+                    if (cloudData.deletedSections) portfolioData.deletedSections = cloudData.deletedSections;
+                } else if (isInitialLoad) {
+                    savePortfolioState();
+                }
+                isInitialLoad = false;
+                portfolioData.isEditMode = localStorage.getItem('portfolio_admin_logged_in') === 'true';
+                renderAll();
+            }, (err) => {
+                console.warn("Firestore onSnapshot warning:", err);
+                renderAll();
+            });
+        } catch (e) {
+            console.error("Gagal menginisialisasi listener Firestore:", e);
             renderAll();
         }
 
-        window.addEventListener('DOMContentLoaded', () => {
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => renderAll());
+        } else {
             renderAll();
-        });
+        }
 
         function renderAll() {
             const els = portfolioData.elements;
@@ -726,10 +792,20 @@
             if(brandName && brandName.innerText.trim() !== (els.brand_name || "Alexandro Rey")) {
                 brandName.innerText = els.brand_name || "Alexandro Rey";
             }
+            const brandSubtitle = document.getElementById('navBrandSubtitle') || document.querySelector('[data-editable="brand_subtitle"]');
+            if(brandSubtitle && brandSubtitle.innerText.trim() !== (els.brand_subtitle || "AI & Fullstack Lead")) {
+                brandSubtitle.innerText = els.brand_subtitle || "AI & Fullstack Lead";
+            }
 
             if(document.getElementById('heroBadgeText')) document.getElementById('heroBadgeText').innerText = els.hero_badge || "";
             if(document.getElementById('heroTitle')) document.getElementById('heroTitle').innerHTML = els.hero_title || "";
             if(document.getElementById('heroSubtitle')) document.getElementById('heroSubtitle').innerText = els.hero_subtitle || "";
+            
+            const heroBtn1 = document.querySelector('[data-editable="hero_btn1"] span');
+            if(heroBtn1 && els.hero_btn1) heroBtn1.innerText = els.hero_btn1;
+            const heroBtn2 = document.querySelector('[data-editable="hero_btn2"]');
+            if(heroBtn2 && els.hero_btn2) heroBtn2.innerText = els.hero_btn2;
+
             if(document.getElementById('codeCardName')) document.getElementById('codeCardName').innerText = `"${els.hero_card_name || 'Alexandro Rey'}"`;
             if(document.getElementById('codeCardRole')) document.getElementById('codeCardRole').innerText = `"${els.hero_card_role || 'Principal Fullstack & AI'}"`;
             if(document.getElementById('codeCardStatus')) document.getElementById('codeCardStatus').innerText = `"${els.hero_card_status || 'Ready for 2026'}"`;
@@ -739,9 +815,22 @@
             if(document.getElementById('aboutDesc')) document.getElementById('aboutDesc').innerText = els.about_desc || "";
 
             if(document.querySelector('[data-editable="proj_tag"]')) document.querySelector('[data-editable="proj_tag"]').innerText = els.proj_tag || "";
+            if(document.querySelector('[data-editable="proj_head"]')) document.querySelector('[data-editable="proj_head"]').innerText = els.proj_head || "";
+
             if(document.querySelector('[data-editable="skill_tag"]')) document.querySelector('[data-editable="skill_tag"]').innerText = els.skill_tag || "";
+            if(document.querySelector('[data-editable="skill_head"]')) document.querySelector('[data-editable="skill_head"]').innerText = els.skill_head || "";
+            if(document.querySelector('[data-editable="skill_desc"]')) document.querySelector('[data-editable="skill_desc"]').innerText = els.skill_desc || "";
+
+            if(document.querySelector('[data-editable="contact_tag"]')) document.querySelector('[data-editable="contact_tag"]').innerText = els.contact_tag || "";
+            if(document.querySelector('[data-editable="contact_head"]')) document.querySelector('[data-editable="contact_head"]').innerText = els.contact_head || "";
+            if(document.querySelector('[data-editable="contact_desc"]')) document.querySelector('[data-editable="contact_desc"]').innerText = els.contact_desc || "";
             if(document.getElementById('contactEmailDisplay')) document.getElementById('contactEmailDisplay').innerText = els.contact_email || "";
             if(document.getElementById('contactLocationDisplay')) document.getElementById('contactLocationDisplay').innerText = els.contact_loc || "";
+            const contactBtn = document.querySelector('[data-editable="contact_btn"] span');
+            if(contactBtn && els.contact_btn) contactBtn.innerText = els.contact_btn;
+
+            const footerCopy = document.querySelector('[data-editable="footer_copy"] p');
+            if(footerCopy && els.footer_copy) footerCopy.innerHTML = els.footer_copy;
 
             // Render About Cards
             const aboutGrid = document.getElementById('aboutCardsGrid');
@@ -845,7 +934,8 @@
             const pass = document.getElementById('loginPasswordInput').value;
             if (pass === 'admin123') {
                 portfolioData.isEditMode = true;
-                savePortfolioState();
+                localStorage.setItem('portfolio_admin_logged_in', 'true');
+                renderAll();
                 closeLoginModal();
                 document.getElementById('loginPasswordInput').value = "";
                 showNotification("Edit Mode Aktif! Klik elemen mana saja dengan ikon ✏️ untuk edit instan.");
@@ -856,13 +946,24 @@
 
         function exitEditMode() {
             portfolioData.isEditMode = false;
-            savePortfolioState();
+            localStorage.removeItem('portfolio_admin_logged_in');
+            renderAll();
             showNotification("Edit mode dinonaktifkan. Navigasi kembali normal.");
         }
 
         function closeModals() {
-            document.querySelectorAll('.fixed').forEach(m => {
-                if(m.id !== 'loginModal') m.classList.add('hidden');
+            const modalIds = [
+                'elementEditorModal',
+                'aboutModal',
+                'projectManagerModal',
+                'singleProjectModal',
+                'skillManagerModal',
+                'addSectionModal',
+                'faqManagerModal'
+            ];
+            modalIds.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.classList.add('hidden');
             });
         }
 
@@ -1302,6 +1403,50 @@
             const menu = document.getElementById('mobileMenu');
             menu.classList.toggle('hidden');
         }
+
+        // Expose functions and data to window so inline HTML onclick/onsubmit attributes work seamlessly
+        Object.assign(window, {
+            portfolioData,
+            savePortfolioState,
+            renderAll,
+            openElementEditor,
+            saveElementModal,
+            deleteSection,
+            toggleEditModeLogin,
+            closeLoginModal,
+            handleLoginSubmit,
+            exitEditMode,
+            closeModals,
+            openAboutModal,
+            saveAboutModal,
+            openProjectManagerModal,
+            renderAdminProjectsList,
+            openSingleProjectModal,
+            closeSingleProjectModal,
+            handleProjImageUpload,
+            saveSingleProject,
+            deleteProjectItem,
+            renderProjects,
+            filterProjects,
+            openSkillManagerModal,
+            renderAdminSkillsList,
+            handleSkillIconUpload,
+            addNewSkill,
+            deleteSkillItem,
+            renderSkills,
+            openAddSectionModal,
+            addPresetSection,
+            openFaqManager,
+            renderFaqItemsInputs,
+            addFaqItemRow,
+            removeFaqItemRow,
+            saveFaqModal,
+            toggleFaqAccordion,
+            renderCustomSections,
+            handleContactSubmit,
+            showNotification,
+            toggleMobileMenu
+        });
     </script>
 </body>
 </html>
